@@ -1,0 +1,20 @@
+
+services:
+  openclaw-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openclaw-api
+    ports:
+      - "8080:8080"
+    volumes:
+      # 挂载 sessions 目录
+      - ~/.openclaw/agents/default/sessions:/root/.openclaw/agents/default/sessions
+    environment:
+      - HOOK_TOKEN=${OPENCLAW_HOOK_TOKEN:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
