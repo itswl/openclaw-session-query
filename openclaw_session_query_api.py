@@ -3,7 +3,7 @@
 OpenClaw Session HTTP API 服务
 
 启动方式:
-    python3 openclaw_api.py [--port 8080]
+    python3 openclaw_session_query_api.py [--port 8080]
 
 API 端点:
 

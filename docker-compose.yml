@@ -1,10 +1,10 @@
 
 services:
-  openclaw-api:
+  openclaw-session-query-api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: openclaw-api
+    container_name: openclaw-session-query-api
     ports:
       - "8080:8080"
     volumes:

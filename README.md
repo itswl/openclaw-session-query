@@ -8,7 +8,7 @@
 - 📋 根据 Run ID 或 Session pattern 查询单个会话
 - 💬 获取会话的详细消息内容
 - ✅ 获取会话的最终结果（最后一条助手消息）
-- 🔒 支持 Bearer Token 认证
+- 🔒 支持 Bearer hook_token 认证
 - 🐳 提供 Docker 和 Docker Compose 部署方式
 - 🏥 内置健康检查端点
 
@@ -29,25 +29,25 @@
 
 ```bash
 # 直接运行（需要 Python 3.6+）
-python3 openclaw_query_api.py [--port 8080] [--host 0.0.0.0] [--token YOUR_TOKEN]
+python3 openclaw_session_query_api.py [--port 8080] [--host 0.0.0.0] [--hook_token YOUR_HOOK_TOKEN]
 
 # 带认证的运行
-python3 openclaw_query_api.py --port 8080 --token mysecrettoken
+python3 openclaw_session_query_api.py --port 8080 --hook_token mysecrethooktoken
 ```
 
 ### Docker 运行
 
 ```bash
 # 构建镜像
-docker build -t openclaw-api .
+docker build -t openclaw-session-query-api .
 
 # 运行容器
 docker run -d \
-  --name openclaw-api \
+  --name openclaw-session-query-api \
   -p 8080:8080 \
   -v ~/.openclaw/agents/default/sessions:/root/.openclaw/agents/default/sessions \
-  -e TOKEN=your_token_here \
-  openclaw-api
+  -e HOOK_TOKEN=your_hook_token_here \
+  openclaw-session-query-api
 ```
 
 ### Docker Compose 运行
@@ -57,7 +57,7 @@ docker run -d \
 docker-compose up -d
 
 # 或者设置环境变量后运行
-OPENCLAW_TOKEN=your_token_here docker-compose up -d
+OPENCLAW_HOOK_TOKEN=your_hook_token_here docker-compose up -d
 ```
 
 ## 使用示例
@@ -97,7 +97,7 @@ curl http://localhost:8080/sessions/hook:alert:prometheus:b5123b01/final
 ### 5. 带认证的请求
 
 ```bash
-curl -H 'Authorization: Bearer your_token_here' http://localhost:8080/sessions
+curl -H 'Authorization: Bearer your_hook_token_here' http://localhost:8080/sessions
 ```
 
 ### 6. 健康检查
@@ -180,14 +180,14 @@ curl http://localhost:8080/health
 |------|--------|------|
 | `--host` | `0.0.0.0` | 绑定主机地址 |
 | `--port` | `8080` | 监听端口 |
-| `--token` | `None` | Bearer 认证令牌 |
+| `--hook_token` | `None` | Bearer 认证令牌 |
 
 ### 环境变量（Docker）
 
 | 环境变量 | 描述 |
 |----------|------|
-| `TOKEN` | 用于 API 认证的 Bearer Token |
-| `OPENCLAW_TOKEN` | docker-compose.yml 中使用的 token 变量 |
+| `HOOK_TOKEN` | 用于 API 认证的 Bearer hook_token |
+| `OPENCLAW_HOOK_TOKEN` | docker-compose.yml 中使用的 hook_token 变量 |
 
 ## 数据源
 
@@ -200,7 +200,7 @@ curl http://localhost:8080/health
 
 ## 安全注意事项
 
-- 建议在生产环境中始终启用 Bearer Token 认证
+- 建议在生产环境中始终启用 Bearer hook_token 认证
 - 避免在公共网络暴露无认证的 API 服务
 - 使用 HTTPS 反向代理（如 Nginx）加密传输
 - 定期更新和轮换认证令牌
@@ -214,8 +214,8 @@ curl http://localhost:8080/health
    - 检查 `~/.openclaw/agents/default/sessions/` 目录权限
 
 2. **认证失败 (401 Unauthorized)**
-   - 确认请求中包含了正确的 Bearer Token
-   - 检查启动时设置的 token 是否与请求中的一致
+   - 确认请求中包含了正确的 Bearer hook_token
+   - 检查启动时设置的 hook_token 是否与请求中的一致
 
 3. **端口冲突**
    - 修改 `--port` 参数使用其他端口
@@ -225,7 +225,7 @@ curl http://localhost:8080/health
 
 ```bash
 # Docker 容器日志
-docker logs openclaw-api
+docker logs openclaw-session-query-api
 
 # Docker Compose 日志
 docker-compose logs -f
@@ -237,7 +237,7 @@ docker-compose logs -f
 
 ```
 .
-├── openclaw_query_api.py    # 主应用程序
+├── openclaw_session_query_api.py    # 主应用程序
 ├── Dockerfile               # Docker 镜像构建文件
 ├── docker-compose.yml       # Docker Compose 配置
 └── README.md               # 项目文档
@@ -248,13 +248,13 @@ docker-compose logs -f
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd openclaw-api
+cd openclaw-session-query-api
 
 # 安装依赖（如有）
 pip install -r requirements.txt
 
 # 运行服务
-python3 openclaw_query_api.py --port 8080
+python3 openclaw_session_query_api.py --port 8080
 ```
 
 ## 许可证
