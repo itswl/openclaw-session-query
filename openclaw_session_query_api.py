@@ -240,7 +240,7 @@ class OpenClawAPI:
         return formatted
 
     def get_final_message(self, pattern: str) -> Optional[Dict]:
-        """获取 session 的最终结果（最后一条 assistant 消息）"""
+        """获取 session 的最终结果（第一个 stopReason="stop" 的 assistant 消息）"""
         key, info = self._find_session(pattern)
         if info is None:
             return None
@@ -267,8 +267,10 @@ class OpenClawAPI:
                 'error': 'Session file not available yet (session may be still initializing)'
             }
 
-        # 读取所有消息，找到最后一条 assistant 消息
+        # 读取所有消息，找到第一个 stopReason="stop" 的 assistant 消息
         all_messages = []
+        first_stop_message = None
+        
         with open(path, 'r') as f:
             for line in f:
                 try:
@@ -280,13 +282,16 @@ class OpenClawAPI:
                             msg_stop_reason = msg.get('stopReason') or data.get('stopReason') or ''
                             data['_msg_stopReason'] = msg_stop_reason
                             all_messages.append(data)
+                            # 记录第一个 stopReason="stop" 的消息
+                            if first_stop_message is None and msg_stop_reason == 'stop':
+                                first_stop_message = data
                 except json.JSONDecodeError:
                     continue
 
-        # 检查是否还有 toolResult 消息在最后一条 assistant 之后（可能还在处理中）
+        # 检查是否还有 toolResult 消息在第一个 stop 消息之后（可能还在处理中）
         is_processing = False
-        if all_messages and status == 'running':
-            last_msg_id = all_messages[-1].get('id', '')
+        if first_stop_message and status == 'running':
+            last_msg_id = first_stop_message.get('id', '')
             with open(path, 'r') as f:
                 for line in f:
                     try:
@@ -299,18 +304,18 @@ class OpenClawAPI:
                     except:
                         pass
 
-        if not all_messages:
+        if first_stop_message is None:
             return {
                 'status': status,
                 'isFinal': False,
                 'isProcessing': status == 'running',
-                'messageCount': 0,
+                'messageCount': len(all_messages),
                 'text': '',
                 'thinking': '',
             }
 
-        # 返回最后一条
-        last = all_messages[-1]
+        # 返回第一个 stopReason="stop" 的消息
+        last = first_stop_message
         msg_data = last.get('message', {})
         content = msg_data.get('content', [])
         # 优先从 msg 里的 stopReason 获取，其次从顶层获取
