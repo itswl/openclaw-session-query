@@ -1,13 +1,13 @@
-# OpenClaw Session HTTP API
+# OpenClaw/Hermes Session HTTP API
 
-一个用于查询和管理 OpenClaw Agent 会话的轻量级 HTTP API 服务。该服务通过 RESTful API 提供对 OpenClaw 会话数据的访问，包括会话列表、消息查询和最终结果获取。
+一个用于查询和管理 OpenClaw/Hermes Agent 会话的轻量级 HTTP API 服务。该服务通过 RESTful API 提供对会话数据的访问，包括会话列表、消息查询和最终结果获取。
 
 ## 功能特性
 
-- 🔍 列出所有 OpenClaw 会话
-- 📋 根据 Run ID 或 Session pattern 查询单个会话
+- 🔍 列出所有会话（支持 OpenClaw 和 Hermes 双模式）
+- 📋 根据 Run ID、Session ID 或 Session pattern 查询单个会话
 - 💬 获取会话的详细消息内容
-- ✅ 获取会话的最终结果（最后一条助手消息）
+- ✅ 获取会话的最终结果（第一个 `finish_reason/stopReason="stop"` 的助手消息）
 - 🔒 支持 Bearer hook_token 认证
 - 🐳 提供 Docker 和 Docker Compose 部署方式
 - 🏥 内置健康检查端点
@@ -28,11 +28,14 @@
 ### 本地运行
 
 ```bash
-# 直接运行（需要 Python 3.6+）
-python3 openclaw_session_query_api.py [--port 8080] [--host 0.0.0.0] [--hook_token YOUR_HOOK_TOKEN]
+# OpenClaw 模式（默认）
+python3 openclaw_session_query_api.py [--port 8080] [--host 0.0.0.0] [--mode openclaw] [--hook_token YOUR_HOOK_TOKEN]
+
+# Hermes 模式
+python3 openclaw_session_query_api.py --port 8080 --mode hermes [--hook_token YOUR_HOOK_TOKEN]
 
 # 带认证的运行
-python3 openclaw_session_query_api.py --port 8080 --hook_token mysecrethooktoken
+python3 openclaw_session_query_api.py --port 8080 --mode hermes --hook_token mysecrethooktoken
 ```
 
 ### Docker 运行
@@ -65,34 +68,56 @@ OPENCLAW_HOOK_TOKEN=your_hook_token_here docker-compose up -d
 ### 1. 列出所有会话
 
 ```bash
+# OpenClaw 模式
+curl http://localhost:8080/sessions
+
+# Hermes 模式
 curl http://localhost:8080/sessions
 ```
 
 ### 2. 查询特定会话
 
 ```bash
-# 通过 Run ID 查询
+# OpenClaw: 通过 Run ID 查询
 curl http://localhost:8080/sessions/5ab8e024-2740-422c-8503-89c01313f792
 
-# 通过 Session pattern 查询
+# OpenClaw: 通过 Session pattern 查询
 curl http://localhost:8080/sessions/hook:alert:prometheus:b5123b01-616a-4da0-ac48-d9c81e3be63c
+
+# Hermes: 通过 delivery_id 查询
+curl http://localhost:8080/sessions/1776580775689
+
+# Hermes: 通过 session_id 查询
+curl http://localhost:8080/sessions/20260419_143935_73e269b4
+
+# Hermes: 通过完整 key 查询
+curl http://localhost:8080/sessions/agent:main:webhook:webhook:webhook:agent:1776580775689:webhook:agent
 ```
 
 ### 3. 获取会话消息
 
 ```bash
-# 获取前 50 条消息
+# OpenClaw: 获取前 50 条消息
 curl http://localhost:8080/sessions/hook:alert:prometheus:b5123b01/messages
 
-# 自定义消息数量
+# OpenClaw: 自定义消息数量
 curl http://localhost:8080/sessions/hook:alert:prometheus:b5123b01/messages?limit=20
+
+# Hermes: 获取消息
+curl http://localhost:8080/sessions/20260419_143935_73e269b4/messages
 ```
 
 ### 4. 获取会话最终结果
 
 ```bash
+# OpenClaw: 获取最终结果
 curl http://localhost:8080/sessions/hook:alert:prometheus:b5123b01/final
+
+# Hermes: 获取最终结果
+curl http://localhost:8080/sessions/20260419_143935_73e269b4/final
 ```
+
+**注意**: 返回的是第一个 `stopReason/finish_reason="stop"` 的助手消息，而非最后一条消息。
 
 ### 5. 带认证的请求
 
@@ -108,7 +133,7 @@ curl http://localhost:8080/health
 
 ## 响应格式
 
-### 会话列表示例
+### 会话列表示例（OpenClaw）
 
 ```json
 {
@@ -123,6 +148,29 @@ curl http://localhost:8080/health
       "model": "gpt-4",
       "runtimeMs": 1234,
       "totalTokens": 5678
+    }
+  ],
+  "total": 1
+}
+```
+
+### 会话列表示例（Hermes）
+
+```json
+{
+  "sessions": [
+    {
+      "key": "agent:main:webhook:webhook:webhook:agent:1776580775689:webhook:agent",
+      "shortKey": "agent:main:webhook:webhook:webhook:agent:1776580775689:webhook:agent",
+      "sessionId": "20260419_143935_73e269b4",
+      "status": "done",
+      "updatedAt": "2026-04-19T14:40:16.669448",
+      "hasFile": true,
+      "createdAt": "2026-04-19T14:39:35.690352",
+      "displayName": "webhook/agent",
+      "platform": "webhook",
+      "totalTokens": 0,
+      "estimatedCostUsd": 0.0
     }
   ],
   "total": 1
@@ -150,7 +198,7 @@ curl http://localhost:8080/health
 }
 ```
 
-### 最终结果示例
+### 最终结果示例（OpenClaw）
 
 ```json
 {
@@ -172,6 +220,24 @@ curl http://localhost:8080/health
 }
 ```
 
+### 最终结果示例（Hermes）
+
+```json
+{
+  "status": "done",
+  "isFinal": true,
+  "isProcessing": false,
+  "messageCount": 2,
+  "id": "",
+  "timestamp": "2026-04-19T14:40:16.636994",
+  "stopReason": "stop",
+  "text": "# 🔴 HighCPU 告警分析\n\n## 告警概要...",
+  "thinking": "The user is asking me to analyze a CPU alert...",
+  "toolCalls": [],
+  "usage": {}
+}
+```
+
 ## 配置选项
 
 ### 命令行参数
@@ -180,6 +246,7 @@ curl http://localhost:8080/health
 |------|--------|------|
 | `--host` | `0.0.0.0` | 绑定主机地址 |
 | `--port` | `8080` | 监听端口 |
+| `--mode` | `openclaw` | 运行模式：`openclaw` 或 `hermes` |
 | `--hook_token` | `None` | Bearer 认证令牌 |
 
 ### 环境变量（Docker）
@@ -191,10 +258,19 @@ curl http://localhost:8080/health
 
 ## 数据源
 
+### OpenClaw 模式
+
 该 API 从以下位置读取 OpenClaw 会话数据：
 
 - `~/.openclaw/agents/default/sessions/sessions.json` - 会话索引文件
 - `~/.openclaw/agents/default/sessions/*.jsonl` - 会话消息文件
+
+### Hermes 模式
+
+该 API 从以下位置读取 Hermes 会话数据：
+
+- `~/.hermes/sessions/sessions.json` - 会话索引文件
+- `~/.hermes/sessions/*.jsonl` - 会话消息文件
 
 确保这些文件存在且可访问，API 才能正常工作。
 
@@ -243,6 +319,20 @@ docker-compose logs -f
 └── README.md               # 项目文档
 ```
 
+### 支持的数据格式
+
+#### OpenClaw 格式
+
+- **sessions.json 字段**: `sessionId`, `sessionFile`, `status`, `updatedAt`, `model`, `runtimeMs`, `totalTokens`
+- **jsonl 格式**: `{"type": "message", "message": {"role": "assistant", "content": [...], "stopReason": "stop"}}`
+- **content 类型**: 数组 `[{type: "text", ...}, {type: "thinking", ...}]`
+
+#### Hermes 格式
+
+- **sessions.json 字段**: `session_id`, `created_at`, `updated_at`, `display_name`, `platform`, `total_tokens`, `estimated_cost_usd`
+- **jsonl 格式**: `{"role": "assistant", "content": "text", "reasoning": "thinking", "finish_reason": "stop"}`
+- **content 类型**: 字符串
+
 ### 本地开发
 
 ```bash
@@ -253,8 +343,11 @@ cd openclaw-session-query-api
 # 安装依赖（如有）
 pip install -r requirements.txt
 
-# 运行服务
-python3 openclaw_session_query_api.py --port 8080
+# OpenClaw 模式运行
+python3 openclaw_session_query_api.py --port 8080 --mode openclaw
+
+# Hermes 模式运行
+python3 openclaw_session_query_api.py --port 8080 --mode hermes
 ```
 
 ## 许可证
