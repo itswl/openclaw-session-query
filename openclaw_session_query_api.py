@@ -3,7 +3,12 @@
 OpenClaw/Hermes Session HTTP API 服务
 
 启动方式:
-    python3 openclaw_session_query_api.py [--port 8080] [--mode openclaw|hermes]
+    python3 openclaw_session_query_api.py [--port 8080]
+
+自动检测模式:
+    - 优先检测 Hermes (~/.hermes/sessions/sessions.json)
+    - 其次检测 OpenClaw (~/.openclaw/agents/default/sessions/sessions.json)
+    - 可通过 --mode 强制指定模式
 
 API 端点:
 
@@ -31,25 +36,59 @@ from urllib.parse import urlparse, parse_qs
 from typing import Optional, Dict, Any, List, Tuple
 import argparse
 
-# 默认模式
-MODE = 'openclaw'
+# 默认模式（自动检测）
+MODE = 'auto'
 
-def init_paths(mode='openclaw'):
+def init_paths(mode='auto'):
     """根据模式初始化路径"""
     if mode == 'hermes':
         return {
+            'mode': 'hermes',
             'sessions_json': Path.home() / ".hermes/sessions/sessions.json",
             'sessions_dir': Path.home() / ".hermes/sessions",
             'session_id_field': 'session_id',
             'stop_reason_field': 'finish_reason',
         }
-    else:  # openclaw
+    elif mode == 'openclaw':
         return {
+            'mode': 'openclaw',
             'sessions_json': Path.home() / ".openclaw/agents/default/sessions/sessions.json",
             'sessions_dir': Path.home() / ".openclaw/agents/default/sessions",
             'session_id_field': 'sessionId',
             'stop_reason_field': 'stopReason',
         }
+    else:  # auto - 自动检测
+        hermes_json = Path.home() / ".hermes/sessions/sessions.json"
+        openclaw_json = Path.home() / ".openclaw/agents/default/sessions/sessions.json"
+        
+        if hermes_json.exists():
+            print(f"自动检测到 Hermes 数据源: {hermes_json}")
+            return {
+                'mode': 'hermes',
+                'sessions_json': hermes_json,
+                'sessions_dir': Path.home() / ".hermes/sessions",
+                'session_id_field': 'session_id',
+                'stop_reason_field': 'finish_reason',
+            }
+        elif openclaw_json.exists():
+            print(f"自动检测到 OpenClaw 数据源: {openclaw_json}")
+            return {
+                'mode': 'openclaw',
+                'sessions_json': openclaw_json,
+                'sessions_dir': Path.home() / ".openclaw/agents/default/sessions",
+                'session_id_field': 'sessionId',
+                'stop_reason_field': 'stopReason',
+            }
+        else:
+            # 默认使用 OpenClaw
+            print("警告: 未检测到数据源，默认使用 OpenClaw")
+            return {
+                'mode': 'openclaw',
+                'sessions_json': openclaw_json,
+                'sessions_dir': Path.home() / ".openclaw/agents/default/sessions",
+                'session_id_field': 'sessionId',
+                'stop_reason_field': 'stopReason',
+            }
 
 PATHS = init_paths(MODE)
 
@@ -612,10 +651,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='OpenClaw/Hermes Session HTTP API')
+    parser = argparse.ArgumentParser(description='OpenClaw/Hermes Session HTTP API (自动检测模式)')
     parser.add_argument('--host', default='0.0.0.0', help='绑定主机 (默认: 0.0.0.0)')
     parser.add_argument('--port', type=int, default=8080, help='端口 (默认: 8080)')
-    parser.add_argument('--mode', choices=['openclaw', 'hermes'], default='openclaw', help='模式 (默认: openclaw)')
+    parser.add_argument('--mode', choices=['auto', 'openclaw', 'hermes'], default='auto', help='模式 (默认: auto 自动检测)')
     parser.add_argument('--hook_token', default=None, help='Bearer hook_token for authentication')
     args = parser.parse_args()
 
@@ -623,7 +662,7 @@ def main():
     global MODE, PATHS
     MODE = args.mode
     PATHS = init_paths(MODE)
-    print(f"运行模式: {MODE}")
+    print(f"运行模式: {PATHS['mode']}")
     print(f"Sessions JSON: {PATHS['sessions_json']}")
     print(f"Sessions Dir: {PATHS['sessions_dir']}")
 
