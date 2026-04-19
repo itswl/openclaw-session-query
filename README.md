@@ -2,9 +2,11 @@
 
 一个用于查询和管理 OpenClaw/Hermes Agent 会话的轻量级 HTTP API 服务。该服务通过 RESTful API 提供对会话数据的访问，包括会话列表、消息查询和最终结果获取。
 
+**✨ 自动检测模式**: 无需手动指定，自动识别数据源并适配格式！
+
 ## 功能特性
 
-- 🔍 列出所有会话（支持 OpenClaw 和 Hermes 双模式）
+- 🔍 **自动检测**: 自动识别 OpenClaw 或 Hermes 数据源，无需手动配置
 - 📋 根据 Run ID、Session ID 或 Session pattern 查询单个会话
 - 💬 获取会话的详细消息内容
 - ✅ 获取会话的最终结果（第一个 `finish_reason/stopReason="stop"` 的助手消息）
@@ -28,14 +30,15 @@
 ### 本地运行
 
 ```bash
-# OpenClaw 模式（默认）
-python3 openclaw_session_query_api.py [--port 8080] [--host 0.0.0.0] [--mode openclaw] [--hook_token YOUR_HOOK_TOKEN]
+# 自动检测模式（推荐）- 自动识别数据源
+python3 openclaw_session_query_api.py [--port 8080]
 
-# Hermes 模式
-python3 openclaw_session_query_api.py --port 8080 --mode hermes [--hook_token YOUR_HOOK_TOKEN]
+# 强制指定模式（可选）
+python3 openclaw_session_query_api.py --mode hermes  # 强制 Hermes
+python3 openclaw_session_query_api.py --mode openclaw  # 强制 OpenClaw
 
-# 带认证的运行
-python3 openclaw_session_query_api.py --port 8080 --mode hermes --hook_token mysecrethooktoken
+# 带认证运行
+python3 openclaw_session_query_api.py --port 8080 --hook_token mysecrethooktoken
 ```
 
 ### Docker 运行
@@ -246,7 +249,7 @@ curl http://localhost:8080/health
 |------|--------|------|
 | `--host` | `0.0.0.0` | 绑定主机地址 |
 | `--port` | `8080` | 监听端口 |
-| `--mode` | `openclaw` | 运行模式：`openclaw` 或 `hermes` |
+| `--mode` | `auto` | 运行模式：`auto`（自动检测）/`openclaw`/`hermes` |
 | `--hook_token` | `None` | Bearer 认证令牌 |
 
 ### 环境变量（Docker）
@@ -258,21 +261,15 @@ curl http://localhost:8080/health
 
 ## 数据源
 
-### OpenClaw 模式
+### 自动检测逻辑
 
-该 API 从以下位置读取 OpenClaw 会话数据：
+服务启动时会自动检测数据源（按优先级）：
 
-- `~/.openclaw/agents/default/sessions/sessions.json` - 会话索引文件
-- `~/.openclaw/agents/default/sessions/*.jsonl` - 会话消息文件
+1. **Hermes**: `~/.hermes/sessions/sessions.json`
+2. **OpenClaw**: `~/.openclaw/agents/default/sessions/sessions.json`
+3. 如果都不存在，默认使用 OpenClaw 路径
 
-### Hermes 模式
-
-该 API 从以下位置读取 Hermes 会话数据：
-
-- `~/.hermes/sessions/sessions.json` - 会话索引文件
-- `~/.hermes/sessions/*.jsonl` - 会话消息文件
-
-确保这些文件存在且可访问，API 才能正常工作。
+**无需手动配置**，服务会自动识别并适配对应的数据格式！
 
 ## 安全注意事项
 
@@ -343,11 +340,12 @@ cd openclaw-session-query-api
 # 安装依赖（如有）
 pip install -r requirements.txt
 
-# OpenClaw 模式运行
-python3 openclaw_session_query_api.py --port 8080 --mode openclaw
+# 自动检测模式运行（推荐）
+python3 openclaw_session_query_api.py --port 8080
 
-# Hermes 模式运行
+# 或强制指定模式
 python3 openclaw_session_query_api.py --port 8080 --mode hermes
+python3 openclaw_session_query_api.py --port 8080 --mode openclaw
 ```
 
 ## 许可证
