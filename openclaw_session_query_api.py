@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-OpenClaw Session HTTP API 服务
+OpenClaw/Hermes Session HTTP API 服务
 
 启动方式:
-    python3 openclaw_session_query_api.py [--port 8080]
+    python3 openclaw_session_query_api.py [--port 8080] [--mode openclaw|hermes]
 
 API 端点:
 
@@ -31,8 +31,27 @@ from urllib.parse import urlparse, parse_qs
 from typing import Optional, Dict, Any, List, Tuple
 import argparse
 
-SESSIONS_JSON = Path.home() / ".openclaw/agents/default/sessions/sessions.json"
-SESSIONS_DIR = Path.home() / ".openclaw/agents/default/sessions"
+# 默认模式
+MODE = 'openclaw'
+
+def init_paths(mode='openclaw'):
+    """根据模式初始化路径"""
+    if mode == 'hermes':
+        return {
+            'sessions_json': Path.home() / ".hermes/sessions/sessions.json",
+            'sessions_dir': Path.home() / ".hermes/sessions",
+            'session_id_field': 'session_id',
+            'stop_reason_field': 'finish_reason',
+        }
+    else:  # openclaw
+        return {
+            'sessions_json': Path.home() / ".openclaw/agents/default/sessions/sessions.json",
+            'sessions_dir': Path.home() / ".openclaw/agents/default/sessions",
+            'session_id_field': 'sessionId',
+            'stop_reason_field': 'stopReason',
+        }
+
+PATHS = init_paths(MODE)
 
 
 class OpenClawAPI:
@@ -40,9 +59,9 @@ class OpenClawAPI:
         pass  # 不缓存任何数据
 
     def _load_sessions(self) -> Dict[str, Any]:
-        if not SESSIONS_JSON.exists():
+        if not PATHS['sessions_json'].exists():
             return {}
-        with open(SESSIONS_JSON, 'r') as f:
+        with open(PATHS['sessions_json'], 'r') as f:
             return json.load(f)
 
     def _find_session(self, pattern: str) -> Optional[Tuple[str, Dict]]:
@@ -57,9 +76,11 @@ class OpenClawAPI:
         if pattern.startswith("Session: "):
             pattern = pattern[9:]
 
-        # 精确匹配 sessionId
+        session_id_field = PATHS['session_id_field']
+        
+        # 精确匹配 sessionId/session_id
         for key, info in sessions.items():
-            if info.get('sessionId', '').lower() == pattern.lower():
+            if info.get(session_id_field, '').lower() == pattern.lower():
                 return key, info
 
         # 匹配完整 key 或 key 的后半部分
@@ -69,16 +90,16 @@ class OpenClawAPI:
             # 精确匹配完整 key
             if key_lower == pattern_lower:
                 return key, info
-            # key 以 pattern 结尾（去掉 agent:default: 前缀后）
+            # key 以 pattern 结尾（去掉 agent:default: 或 agent:main: 前缀后）
             if key_lower.endswith(':' + pattern_lower):
                 return key, info
-            # pattern 是 key 的最后一部分（如 b5123b01-... 应该匹配 agent:default:...b5123b01-...）
+            # pattern 是 key 的最后一部分
             if pattern_lower in key_lower:
                 return key, info
 
-        # 模糊匹配 UUID 部分
-        for key, info in self.sessions.items():
-            if pattern_lower in info.get('sessionId', '').lower():
+        # 模糊匹配 ID 部分
+        for key, info in sessions.items():
+            if pattern_lower in info.get(session_id_field, '').lower():
                 return key, info
 
         return None, None
@@ -103,7 +124,11 @@ class OpenClawAPI:
                 break
             try:
                 data = json.loads(line.strip())
+                # OpenClaw 格式: type=message
                 if data.get('type') == 'message':
+                    messages.append(data)
+                # Hermes 格式: role=user/assistant
+                elif data.get('role') in ['user', 'assistant']:
                     messages.append(data)
             except json.JSONDecodeError:
                 continue
@@ -112,38 +137,60 @@ class OpenClawAPI:
 
     def _format_message(self, msg: Dict) -> Dict:
         """格式化单条消息"""
-        content = msg.get('message', {}).get('content', [])
-        role = msg.get('message', {}).get('role', 'unknown')
+        # OpenClaw 格式
+        if msg.get('type') == 'message':
+            content = msg.get('message', {}).get('content', [])
+            role = msg.get('message', {}).get('role', 'unknown')
+        # Hermes 格式
+        else:
+            content = msg.get('content', '')
+            role = msg.get('role', 'unknown')
 
         parts = []
-        for item in content:
-            if isinstance(item, dict):
-                if item.get('type') == 'text':
-                    parts.append({'type': 'text', 'content': item.get('text', '')})
-                elif item.get('type') == 'thinking':
-                    thinking = item.get('thinking', '')
-                    if len(thinking) > 1000:
-                        thinking = thinking[:1000] + '...[truncated]'
-                    parts.append({'type': 'thinking', 'content': thinking})
-                elif item.get('type') == 'toolCall':
-                    parts.append({
-                        'type': 'toolCall',
-                        'name': item.get('name', ''),
-                        'arguments': item.get('arguments', {})
-                    })
-                elif item.get('type') == 'toolResult':
-                    result = item.get('content', [])
-                    result_text = ''
-                    for r in result:
-                        if isinstance(r, dict) and r.get('type') == 'text':
-                            result_text = r.get('text', '')
-                            if len(result_text) > 500:
-                                result_text = result_text[:500] + '...[truncated]'
-                    parts.append({
-                        'type': 'toolResult',
-                        'toolName': item.get('toolName', ''),
-                        'content': result_text
-                    })
+        
+        # OpenClaw: content 是数组
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get('type') == 'text':
+                        parts.append({'type': 'text', 'content': item.get('text', '')})
+                    elif item.get('type') == 'thinking':
+                        thinking = item.get('thinking', '')
+                        if len(thinking) > 1000:
+                            thinking = thinking[:1000] + '...[truncated]'
+                        parts.append({'type': 'thinking', 'content': thinking})
+                    elif item.get('type') == 'toolCall':
+                        parts.append({
+                            'type': 'toolCall',
+                            'name': item.get('name', ''),
+                            'arguments': item.get('arguments', {})
+                        })
+                    elif item.get('type') == 'toolResult':
+                        result = item.get('content', [])
+                        result_text = ''
+                        for r in result:
+                            if isinstance(r, dict) and r.get('type') == 'text':
+                                result_text = r.get('text', '')
+                                if len(result_text) > 500:
+                                    result_text = result_text[:500] + '...[truncated]'
+                        parts.append({
+                            'type': 'toolResult',
+                            'toolName': item.get('toolName', ''),
+                            'content': result_text
+                        })
+        # Hermes: content 是字符串
+        elif isinstance(content, str):
+            if role == 'assistant':
+                # 提取 reasoning (thinking)
+                reasoning = msg.get('reasoning', '')
+                if reasoning:
+                    if len(reasoning) > 1000:
+                        reasoning = reasoning[:1000] + '...[truncated]'
+                    parts.append({'type': 'thinking', 'content': reasoning})
+                # 添加文本内容
+                parts.append({'type': 'text', 'content': content})
+            else:
+                parts.append({'type': 'text', 'content': content})
 
         return {
             'id': msg.get('id', ''),
@@ -188,31 +235,51 @@ class OpenClawAPI:
         if info is None:
             return None
 
-        session_id = info.get('sessionId', '')
+        session_id_field = PATHS['session_id_field']
+        session_id = info.get(session_id_field, '')
         session_file = info.get('sessionFile', '')
         file_exists = Path(session_file).exists() if session_file else False
 
         # 如果 sessionFile 不存在但 sessionId 存在，尝试在 SESSIONS_DIR 中查找
         if not file_exists and session_id:
-            alt_path = SESSIONS_DIR / f"{session_id}.jsonl"
+            alt_path = PATHS['sessions_dir'] / f"{session_id}.jsonl"
             if alt_path.exists():
                 session_file = str(alt_path)
                 file_exists = True
 
-        return {
+        result = {
             'key': key,
             'sessionId': session_id,
             'sessionFile': session_file if file_exists else None,
             'hasFile': file_exists,
-            'status': info.get('status', 'unknown'),
-            'updatedAt': info.get('updatedAt', 0),
-            'model': info.get('model', ''),
-            'runtimeMs': info.get('runtimeMs', 0),
-            'inputTokens': info.get('inputTokens', 0),
-            'outputTokens': info.get('outputTokens', 0),
-            'totalTokens': info.get('totalTokens', 0),
-            'estimatedCostUsd': info.get('estimatedCostUsd', 0),
         }
+        
+        # 根据模式添加不同字段
+        if MODE == 'openclaw':
+            result.update({
+                'status': info.get('status', 'unknown'),
+                'updatedAt': info.get('updatedAt', 0),
+                'model': info.get('model', ''),
+                'runtimeMs': info.get('runtimeMs', 0),
+                'inputTokens': info.get('inputTokens', 0),
+                'outputTokens': info.get('outputTokens', 0),
+                'totalTokens': info.get('totalTokens', 0),
+                'estimatedCostUsd': info.get('estimatedCostUsd', 0),
+            })
+        else:  # hermes
+            result.update({
+                'status': 'done',  # hermes 可能没有 status 字段
+                'createdAt': info.get('created_at', ''),
+                'updatedAt': info.get('updated_at', ''),
+                'displayName': info.get('display_name', ''),
+                'platform': info.get('platform', ''),
+                'inputTokens': info.get('input_tokens', 0),
+                'outputTokens': info.get('output_tokens', 0),
+                'totalTokens': info.get('total_tokens', 0),
+                'estimatedCostUsd': info.get('estimated_cost_usd', 0),
+            })
+        
+        return result
 
     def get_messages(self, pattern: str, limit: int = 50) -> Optional[List[Dict]]:
         """获取 session 的消息"""
@@ -220,7 +287,8 @@ class OpenClawAPI:
         if info is None:
             return None
 
-        session_id = info.get('sessionId', '')
+        session_id_field = PATHS['session_id_field']
+        session_id = info.get(session_id_field, '')
         session_file = info.get('sessionFile', '')
 
         # 查找实际文件
@@ -228,7 +296,7 @@ class OpenClawAPI:
         if session_file and Path(session_file).exists():
             path = Path(session_file)
         elif session_id:
-            alt_path = SESSIONS_DIR / f"{session_id}.jsonl"
+            alt_path = PATHS['sessions_dir'] / f"{session_id}.jsonl"
             if alt_path.exists():
                 path = alt_path
 
@@ -240,21 +308,23 @@ class OpenClawAPI:
         return formatted
 
     def get_final_message(self, pattern: str) -> Optional[Dict]:
-        """获取 session 的最终结果（第一个 stopReason="stop" 的 assistant 消息）"""
+        """获取 session 的最终结果（第一个 finish_reason/stopReason="stop" 的 assistant 消息）"""
         key, info = self._find_session(pattern)
         if info is None:
             return None
 
-        session_id = info.get('sessionId', '')
+        session_id_field = PATHS['session_id_field']
+        stop_reason_field = PATHS['stop_reason_field']
+        session_id = info.get(session_id_field, '')
         session_file = info.get('sessionFile', '')
-        status = info.get('status', 'unknown')
+        status = info.get('status', 'done')  # hermes 默认 done
 
         # 查找实际文件
         path = None
         if session_file and Path(session_file).exists():
             path = Path(session_file)
         elif session_id:
-            alt_path = SESSIONS_DIR / f"{session_id}.jsonl"
+            alt_path = PATHS['sessions_dir'] / f"{session_id}.jsonl"
             if alt_path.exists():
                 path = alt_path
 
@@ -267,7 +337,7 @@ class OpenClawAPI:
                 'error': 'Session file not available yet (session may be still initializing)'
             }
 
-        # 读取所有消息，找到第一个 stopReason="stop" 的 assistant 消息
+        # 读取所有消息，找到第一个 finish_reason/stopReason="stop" 的 assistant 消息
         all_messages = []
         first_stop_message = None
         
@@ -275,16 +345,26 @@ class OpenClawAPI:
             for line in f:
                 try:
                     data = json.loads(line.strip())
+                    # OpenClaw 格式
                     if data.get('type') == 'message':
                         msg = data.get('message', {})
                         if msg.get('role') == 'assistant':
-                            # 保存时包含 msg 里的 stopReason
-                            msg_stop_reason = msg.get('stopReason') or data.get('stopReason') or ''
+                            # 保存时包含 msg 里的 finish_reason/stopReason
+                            msg_stop_reason = msg.get(stop_reason_field) or data.get(stop_reason_field) or ''
                             data['_msg_stopReason'] = msg_stop_reason
                             all_messages.append(data)
-                            # 记录第一个 stopReason="stop" 的消息
+                            # 记录第一个 finish_reason/stopReason="stop" 的消息
                             if first_stop_message is None and msg_stop_reason == 'stop':
                                 first_stop_message = data
+                    # Hermes 格式
+                    elif data.get('role') == 'assistant':
+                        # 保存时包含 finish_reason/stopReason
+                        msg_stop_reason = data.get(stop_reason_field, '')
+                        data['_msg_stopReason'] = msg_stop_reason
+                        all_messages.append(data)
+                        # 记录第一个 finish_reason/stopReason="stop" 的消息
+                        if first_stop_message is None and msg_stop_reason == 'stop':
+                            first_stop_message = data
                 except json.JSONDecodeError:
                     continue
 
@@ -296,11 +376,13 @@ class OpenClawAPI:
                 for line in f:
                     try:
                         data = json.loads(line.strip())
+                        # OpenClaw 格式
                         if data.get('type') == 'message':
                             msg = data.get('message', {})
                             if msg.get('role') == 'toolResult' and data.get('parentId') == last_msg_id:
                                 is_processing = True
                                 break
+                        # Hermes 格式没有 toolResult 概念，跳过
                     except:
                         pass
 
@@ -314,12 +396,19 @@ class OpenClawAPI:
                 'thinking': '',
             }
 
-        # 返回第一个 stopReason="stop" 的消息
+        # 返回第一个 finish_reason/stopReason="stop" 的消息
         last = first_stop_message
-        msg_data = last.get('message', {})
-        content = msg_data.get('content', [])
-        # 优先从 msg 里的 stopReason 获取，其次从顶层获取
-        stop_reason = last.get('_msg_stopReason') or msg_data.get('stopReason') or last.get('stopReason', '')
+        
+        # OpenClaw 格式
+        if last.get('type') == 'message':
+            msg_data = last.get('message', {})
+            content = msg_data.get('content', [])
+            # 优先从 msg 里的 finish_reason/stopReason 获取，其次从顶层获取
+            stop_reason = last.get('_msg_stopReason') or msg_data.get(stop_reason_field) or last.get(stop_reason_field, '')
+        # Hermes 格式
+        else:
+            content = last.get('content', '')
+            stop_reason = last.get('_msg_stopReason', '')
 
         # 如果 stopReason 是 "stop"，认为已结束
         is_stopped = stop_reason == 'stop'
@@ -339,17 +428,24 @@ class OpenClawAPI:
             'usage': last.get('usage', {}),
         }
 
-        for c in content:
-            if isinstance(c, dict):
-                if c.get('type') == 'text':
-                    result['text'] = c.get('text', '')
-                elif c.get('type') == 'thinking':
-                    result['thinking'] = c.get('thinking', '')
-                elif c.get('type') == 'toolCall':
-                    result['toolCalls'].append({
-                        'name': c.get('name', ''),
-                        'arguments': c.get('arguments', {})
-                    })
+        # OpenClaw: content 是数组
+        if isinstance(content, list):
+            for c in content:
+                if isinstance(c, dict):
+                    if c.get('type') == 'text':
+                        result['text'] = c.get('text', '')
+                    elif c.get('type') == 'thinking':
+                        result['thinking'] = c.get('thinking', '')
+                    elif c.get('type') == 'toolCall':
+                        result['toolCalls'].append({
+                            'name': c.get('name', ''),
+                            'arguments': c.get('arguments', {})
+                        })
+        # Hermes: content 是字符串
+        elif isinstance(content, str):
+            result['text'] = content
+            # 提取 reasoning
+            result['thinking'] = last.get('reasoning', '')
 
         return result
 
@@ -516,11 +612,20 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='OpenClaw Session HTTP API')
+    parser = argparse.ArgumentParser(description='OpenClaw/Hermes Session HTTP API')
     parser.add_argument('--host', default='0.0.0.0', help='绑定主机 (默认: 0.0.0.0)')
     parser.add_argument('--port', type=int, default=8080, help='端口 (默认: 8080)')
+    parser.add_argument('--mode', choices=['openclaw', 'hermes'], default='openclaw', help='模式 (默认: openclaw)')
     parser.add_argument('--hook_token', default=None, help='Bearer hook_token for authentication')
     args = parser.parse_args()
+
+    # 设置模式
+    global MODE, PATHS
+    MODE = args.mode
+    PATHS = init_paths(MODE)
+    print(f"运行模式: {MODE}")
+    print(f"Sessions JSON: {PATHS['sessions_json']}")
+    print(f"Sessions Dir: {PATHS['sessions_dir']}")
 
     # 设置认证 hook_token
     if args.hook_token:
@@ -530,7 +635,7 @@ def main():
         print("警告: 未设置认证hook_token，API 公开访问")
 
     server = HTTPServer((args.host, args.port), RequestHandler)
-    print(f"OpenClaw Session API 启动成功")
+    print(f"\nSession API 启动成功")
     print(f"监听地址: http://{args.host}:{args.port}")
     print(f"\nAPI 端点:")
     print(f"  GET /sessions                      - 列出所有 session")
@@ -540,7 +645,11 @@ def main():
     print(f"  GET /health                        - 健康检查")
     print(f"\n示例:")
     print(f"  curl http://localhost:{args.port}/sessions")
-    print(f"  curl -H 'Authorization: Bearer xxx' http://localhost:{args.port}/sessions/hook:alert:prometheus:b5123b01")
+    if MODE == 'hermes':
+        print(f"  curl http://localhost:{args.port}/sessions/1776580775689")
+        print(f"  curl http://localhost:{args.port}/sessions/20260419_143935_73e269b4/final")
+    else:
+        print(f"  curl -H 'Authorization: Bearer xxx' http://localhost:{args.port}/sessions/hook:alert:prometheus:b5123b01")
     print(f"\n按 Ctrl+C 停止服务")
 
     try:
